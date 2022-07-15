@@ -78,27 +78,30 @@ class _Checker:
                  parametersNames: list,
                  validParameters: dict,
                  args: tuple,
-                 kwargs: dict):
+                 kwargs: dict,
+                 decoratedFunction: str = None):
         self.functionName = functionName
+        self.decoratedFun = decoratedFunction
         self.parametersNames = parametersNames
         self.validParameters = validParameters
         self.args = args
         self.kwargs = kwargs
     
     def checkParameters(self):
-        nameInfoDict = self._prepareArguments()
-        retString = []
+        nameInfoDict, retString = self._prepareArguments()
         for argName, (userArgVal, *argObjList) in nameInfoDict.items():
             for argObj in argObjList:
                 try:
                     argObj.checkValidity(userArgVal)
                 except _WrongType:
-                    retString.append(f'{argName}: {userArgVal} is not {argObj.argType.__name__}')  
+                    retString.append(f'''- {argName}: {userArgVal.join("''") if isinstance(userArgVal, str) else userArgVal} is not {argObj.argType.__name__}''')  
                 except _WrongValue:
-                    retString.append(f"""{argName}: {userArgVal.join("''") if isinstance(userArgVal, str) else userArgVal} not in {argObj.validValues}""")
-        return f'{self.functionName}():\n' + '\n'.join(retString) if retString else ''
+                    retString.append(f"""- {argName}: {userArgVal.join("''") if isinstance(userArgVal, str) else userArgVal} not in {argObj.validValues}""")
+        funName = self.functionName if self.decoratedFun is None else self.decoratedFun.__name__
+        return f'{funName}({", ".join(self.parametersNames)}):\n' + '\n'.join(retString) if retString else ''
 
     def _prepareArguments(self):
+        retString = []
         usedParametersNames = [name for name, _ in zip(self.parametersNames, self.args)]\
                             + [name for name in self.kwargs.keys() if name in self.parametersNames]
         userArgValues = self.args+tuple(self.kwargs.values())
@@ -107,13 +110,18 @@ class _Checker:
         argumentsByName = {item.name : item for item in self.validParameters if item.name is not None}
         argumentsByIndex = {item.argIndex : item for item in self.validParameters if item.argIndex is not None}
         
-        for key, argObj in argumentsByName.items():
-            nameInfoDict[key].append(argObj)
-        for key, argObj in argumentsByIndex.items():
-            keyName = list(nameInfoDict.keys())[key]
-            nameInfoDict[keyName].append(argObj)
+        for name, argObj in argumentsByName.items():
+            nameInfoDict[name].append(argObj)
+        for index, argObj in argumentsByIndex.items():
+            if len(usedParametersNames) <= index:
+                neededType = f' Needed type: {argObj.argType.__name__}.' if argObj.argType is not None else ''
+                neededValues = f' Needed values: {argObj.validValues}.' if argObj.validValues is not None else ''
+                retString.append(f'- Argument on index {argObj.argIndex} not specified.' + neededType + neededValues)
+                continue
+            name = usedParametersNames[index]
+            nameInfoDict[name].append(argObj)
             
-        return nameInfoDict
+        return nameInfoDict, retString
     
     
 class WrongParameters(Exception):
@@ -127,17 +135,23 @@ class WrongParameters(Exception):
                  validParameters: dict = None,
                  args: tuple = None,
                  kwargs: dict = None,
-                 readyErrorMessage: str = None):
+                 readyErrorMessage: str = None,
+                 decoratedFunction: str = None):
         if readyErrorMessage is not None:
             super().__init__(readyErrorMessage)
+            
+        # has to be here so that `errorHandler` can pass it from raw exception 
+        # to the one with arguments
+        self.decoratedFunction = decoratedFunction
+        
         if functionName is None:
             return
-        self.functionName = functionName
         self.checker = _Checker(functionName,
                                 parametersNames,
                                 validParameters,
                                 args,
-                                kwargs)
+                                kwargs,
+                                decoratedFunction)
         super().__init__(self.checker.checkParameters())
 
 
@@ -150,15 +164,16 @@ def errorHandler(validParameters):
         def modFun(*args, **kwargs):
             try:
                 return function(*args, **kwargs)
-            except WrongParameters:
-                pass
+            except WrongParameters as e:
+                decoratedFun = e.decoratedFunction
             
-            parametersNames = [*inspect.signature(function).parameters]
+            parametersNames = [*inspect.signature(function if decoratedFun is None else decoratedFun).parameters]
             raise WrongParameters(function.__name__, 
                                   parametersNames, 
                                   validParameters[function.__name__], 
                                   args, 
-                                  kwargs)
+                                  kwargs,
+                                  decoratedFunction=decoratedFun)
         return modFun
     return errorHandlerInner
 

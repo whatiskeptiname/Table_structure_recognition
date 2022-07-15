@@ -27,7 +27,7 @@ Due to amount of data greater than my 8GB RAM, `src/batchProcessing.py` file com
 - behaviour parameterization
 - input parameters validation <br>
 
-All this without need to change implementation of processing function (except of adding one parameter that specifies decorator behavior). <br>
+All this without need to change implementation of processing function <br>(except for first parameter that has to be `list` and the second one that has to be `dict` that specifies decorator behavior). <br>
 Example:
 
 
@@ -42,4 +42,19 @@ def process1(itemsToProcess):
 def process2(itemsToProcess, params):
     # same processing as above...
     return processedItems
+
+# ---------------------------------------- #
+
+# Wrong input parameters raise `WrongParameters` exception 
+process2(5, 'foo')
+
+# Error message:
+WrongParameters: process2(itemsToProcess, params):
+- itemsToProcess: 5 is not list
+- params: 'foo' is not dict
+
 ```
+
+*due to multiprocessing, using exceptions concerning decorated function is limited to `try...except` block inside that function
+
+

@@ -13,6 +13,7 @@ validParameters = {
                            Argument(argType=dict, argIndex=1)]
 }
 
+
 def parallel(function):
     '''
     Decorator to make processing function parallel without changing it's implementation
@@ -48,10 +49,11 @@ def parallel(function):
             data = args[0]
             params = args[1]
             data = _splitData(data, params)
-        except (IndexError, TypeError):
-            # `IndexError` when there are not enough parameters
+        except (IndexError, AttributeError, TypeError):
+            # `IndexError` when there are not enough args
+            # `AttributeError` when `params` is not dict
             # `TypeError` when `data` has no len()
-            raise WrongParameters
+            raise WrongParameters(decoratedFunction=function)
         
         parallelReturn = Parallel(cpu_count())(
                                         delayed(_saveResults(function))
@@ -80,35 +82,35 @@ def _splitData(data, params):
     nRecordsInSplit = len(data)/nSplits
     return [data[index:index+int(nRecordsInSplit)] for index in range(0, len(data), int(nRecordsInSplit))]
 
-def _dumpData(data, params, fileName):
+def _dumpData(data, params, fileName, function):
     storeResults = params.get('storeResults', True)
     if not storeResults:
         return
     testType = params.get('testType')
     trialIndex = params.get('trialIndex')
     if testType is None or trialIndex is None:
-        raise WrongParameters
+        raise WrongParameters(decoratedFunction=function)
     compressMethod = params.get('compressMethod', 0)
     storeLocation = fileNames.getTestsTrialDir(testType, trialIndex, fileName)
     dump(data, storeLocation, compress=compressMethod)
     
 def _saveResults(function):
     def modFun(*args, **kwargs):
-        fileName = args[-1]
+        dumpfileName = args[-1]
         args = args[:-1]
         params = args[1]
         returnResults = params.get('returnResults', False)
         try:
             results = function(*args, **kwargs)
         except:
-            errorPath = fileNames.getTestsTrialDir(params.get('testType'), params.get('trialIndex'), f'error{fileName}')
+            errorPath = fileNames.getTestsTrialDir(params.get('testType'), params.get('trialIndex'), f'error{dumpfileName}')
             errorMessage = traceback.format_exc()
             dumpError(errorPath, errorMessage)
-            return fileName, False, None
-        _dumpData(results, params, fileName)
+            return dumpfileName, False, None
+        _dumpData(results, params, dumpfileName, function)
         if returnResults:
-            return fileName, True, results
-        return fileName, True, None
+            return dumpfileName, True, results
+        return dumpfileName, True, None
     return modFun
 
 
