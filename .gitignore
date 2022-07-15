@@ -1,3 +1,10 @@
+# Files added by me
+*.ipynb
+data/
+tests/
+
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
