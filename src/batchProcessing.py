@@ -3,6 +3,8 @@ import os
 import warnings
 import traceback
 import time
+import numpy as np
+from tqdm import tqdm
 
 import src.fileNames as fileNames
 from src.errorHandling import Argument, errorHandler, WrongParameters, dumpError
@@ -12,6 +14,127 @@ validParameters = {
     'processInParallel' : [Argument(argType=list, argIndex=0),
                            Argument(argType=dict, argIndex=1)]
 }
+
+class TqdmParallel(Parallel):
+    '''
+    Overwritten `joblib.Parallel` class to enable showing progress using `tqdm`
+    
+    # Parameters:
+    ---
+    nParts: int
+        Amount of parts data was splitted on; passed as `total` parameter to `tqdm`
+    n_jobs: int
+        First argument passed to `Parallel`\n
+        totally no need to be here, but I was passing it either way and wanted\n
+        it to be here so I know why I passed two parameters
+    '''
+    def __init__(self, nParts: int, n_jobs: int, *args, **kwargs):
+        self.nParts = nParts
+        super().__init__(n_jobs, *args, **kwargs)
+    
+    def __call__(self, *args, **kwargs):
+        with tqdm(total=self.nParts) as self._tqdm:
+            return Parallel.__call__(self, *args, **kwargs)
+        
+    def print_progress(self):
+        self._tqdm.n = self.n_completed_tasks
+        self._tqdm.refresh()
+        
+        
+class _ParallelHelper:
+    '''
+    Helper class that stores parameters and methods used in `src.batchProcessing.parallel`.\n
+    Used and written only for `parallel`
+    '''
+    def __init__(self, params, decoratedFunction):
+        self.startTime = time.time()
+        self._params = params
+        self.testType = params.get('testType')
+        self.trialIndex = params.get('trialIndex')
+        self.returnResults = params.get('returnResults', False)
+        self.storeResults = params.get('storeResults', True)
+        self.compressMethod = params.get('compressMethod', 0)
+        self.nParts = params.get('nParts', 8)
+        self.decoratedFunction = decoratedFunction
+    
+    @property
+    def params(self):
+        self._params['totalSize'] = self._getTotalSize()
+        self._params['totalTime'] = round(time.time() - self.startTime, 3)
+        return self._params
+
+    def splitData(self, data):
+        # TODO: better data splitting
+        nRecordsInSplit = len(data)/(self.nParts-1)
+        return [data[index:index+int(nRecordsInSplit)] for index in range(0, len(data), int(nRecordsInSplit))]
+    
+    def process(self, dumpfileName):
+        '''
+        Main method of `_ParallelHelper` that is responsible for running decorated function
+        '''
+        def modFun(*args, **kwargs):
+            # dumpfileName = args[-1]
+            # args = args[:-1]
+            try:
+                results = self.decoratedFunction(*args, **kwargs)
+            except:
+                self.dumpData(traceback.format_exc(), f'error{dumpfileName}')
+                return dumpfileName, False, None
+            self.dumpData(results, dumpfileName)
+            if self.returnResults:
+                return dumpfileName, True, results
+            return dumpfileName, True, None
+        return modFun
+    
+    def dumpData(self, data, fileName):
+        if not self.storeResults:
+            return
+        storeLocation = self.getTrialFolder(fileName)
+        dump(data, storeLocation, compress=self.compressMethod)
+        
+    def getTrialFolder(self, fileName = ''):
+        try:
+            return fileNames.getTestsTrialDir(self.testType, self.trialIndex, fileName)
+        except:
+            raise WrongParameters(decoratedFunction=self.decoratedFunction)
+        
+    
+    def getSuccessfulResults(self, parallelReturn):
+        # parallelReturn[index][0] -> fileName
+        # parallelReturn[index][1] -> returnStatus
+        # parallelReturn[index][2] -> results
+        if not all(item[1] for item in parallelReturn):
+            failedList = [item[0] for item in parallelReturn if not item[1]]
+            warnings.warn(f'{len(failedList)}/{len(parallelReturn)} processes failed.\
+                        \nFailed save data to files: {failedList}')
+            
+        if not self.returnResults:
+            return None
+        successfulResults = [item[2] for item in parallelReturn if item[1] and item[2] is not None]
+        try:
+            if len(successfulResults[0]) > 1:
+                # `function` returns more than one value
+               successfulResults = self._reorderResults(successfulResults)
+        except:
+            # `function` does not return list -> returned object has no len()
+            pass
+        
+    def _getTotalSize(self):
+        totalSize = 0
+        for file in os.scandir(self.getTrialFolder()):
+            if file.name != 'metadata':
+                totalSize += os.path.getsize(file)
+        return totalSize
+    
+    def _reorderResults(self, results):
+        transposed = np.array(results, dtype=object).transpose()
+        unnestedResults = []
+        for index, item in enumerate(transposed):
+            try:
+                unnestedResults.append(np.concatenate(item))
+            except:
+                unnestedResults.append(item)
+        return tuple(unnestedResults)
 
 
 def parallel(function):
@@ -29,7 +152,7 @@ def parallel(function):
         - `'storeResults'`: `bool` [optional], default: `True`
         - `'compressMethod'`: `int`/`str` [optional], default: `0`
             - parameter `compress` in `joblib.dump`
-        - `'nSplits'`: int [optional], default: `8`
+        - `'nParts'`: int [optional], default: `8`
             - amount of splits on processed data, `nParts-1` splits are equal
     - any other needed parameters
     
@@ -41,77 +164,28 @@ def parallel(function):
     If any of processing units fails, this function \n
     shows accumulated warning and continues
     '''
-    
     @errorHandler(validParameters)
     def processInParallel(*args, **kwargs):
-        startTime = time.time()
         try:
             data = args[0]
             params = args[1]
-            data = _splitData(data, params)
+            info = _ParallelHelper(params, function)
+            data = info.splitData(data)
         except (IndexError, AttributeError, TypeError):
             # `IndexError` when there are not enough args
             # `AttributeError` when `params` is not dict
             # `TypeError` when `data` has no len()
             raise WrongParameters(decoratedFunction=function)
         
-        parallelReturn = Parallel(cpu_count())(
-                                        delayed(_saveResults(function))
-                                        (toProcess, params, *args[2:], str(fileIndex), **kwargs) for fileIndex, toProcess in enumerate(data))
-        # parallelReturn[index][0] -> fileName
-        # parallelReturn[index][1] -> returnStatus
-        # parallelReturn[index][2] -> results
+        parallelReturn = TqdmParallel(info.nParts, cpu_count())(
+                                        delayed(info.process(str(fileIndex)))
+                                        (toProcess, *args[1:], **kwargs) for fileIndex, toProcess in enumerate(data))
         
-        if not all(item[1] for item in parallelReturn):
-            failedList = [item[0] for item in parallelReturn if not item[1]]
-            warnings.warn(f'{len(failedList)}/{len(parallelReturn)} processes failed.\
-                        \nFailed save data to files: {failedList}')
+        successfulResults = info.getSuccessfulResults(parallelReturn)
+        info.dumpData(info.params, 'metadata')
+        return successfulResults
         
-        totalTime = time.time() - startTime
-        params['processingTime'] = round(totalTime, 3)
-        _dumpData(params, params, 'metadata')
-        successfulResults = [item[2] for item in parallelReturn if item[1] and item[2] is not None]
-        
-        if params.get('returnResults', False) and successfulResults:
-            return [y for x in successfulResults for y in x]
-        return None
     return processInParallel
-
-def _splitData(data, params):
-    nSplits = params.get('nSplits', 8)
-    nRecordsInSplit = len(data)/nSplits
-    return [data[index:index+int(nRecordsInSplit)] for index in range(0, len(data), int(nRecordsInSplit))]
-
-def _dumpData(data, params, fileName, function):
-    storeResults = params.get('storeResults', True)
-    if not storeResults:
-        return
-    testType = params.get('testType')
-    trialIndex = params.get('trialIndex')
-    if testType is None or trialIndex is None:
-        raise WrongParameters(decoratedFunction=function)
-    compressMethod = params.get('compressMethod', 0)
-    storeLocation = fileNames.getTestsTrialDir(testType, trialIndex, fileName)
-    dump(data, storeLocation, compress=compressMethod)
-    
-def _saveResults(function):
-    def modFun(*args, **kwargs):
-        dumpfileName = args[-1]
-        args = args[:-1]
-        params = args[1]
-        returnResults = params.get('returnResults', False)
-        try:
-            results = function(*args, **kwargs)
-        except:
-            errorPath = fileNames.getTestsTrialDir(params.get('testType'), params.get('trialIndex'), f'error{dumpfileName}')
-            errorMessage = traceback.format_exc()
-            dumpError(errorPath, errorMessage)
-            return dumpfileName, False, None
-        _dumpData(results, params, dumpfileName, function)
-        if returnResults:
-            return dumpfileName, True, results
-        return dumpfileName, True, None
-    return modFun
 
 
 def loadTrial(testType, trialIndex, firstN = None) -> tuple:
@@ -123,13 +197,18 @@ def loadTrial(testType, trialIndex, firstN = None) -> tuple:
     `tuple`: (data, None) if 'metadata' file was not found in trial folder
     '''
     trialPath = fileNames.getTestsTrialDir(testType, trialIndex)
-    filesToLoad = os.listdir(trialPath)
+    filesToLoad = [file for file in os.listdir(trialPath) if file != 'metadata' and not file.startswith('error')]
     filesToLoad = filesToLoad if firstN is None else filesToLoad[:firstN]
-    data = [load(f'{trialPath}/{fileToLoad}') for fileToLoad in filesToLoad][0]
+    data = [y for x in [load(f'{trialPath}/{fileToLoad}') for fileToLoad in filesToLoad] for y in x]
     metadata = None
     if os.path.exists(f'{trialPath}/metadata'):
         metadata = load(f'{trialPath}/metadata')
     return data, metadata
+
+def loadErrors(testType, trialIndex):
+    trialPath = fileNames.getTestsTrialDir(testType, trialIndex)
+    filesToLoad = [file for file in os.listdir(trialPath) if file.startswith('error')]
+    return [load(f'{trialPath}/{fileToLoad}') for fileToLoad in filesToLoad]
 
 
 def getParamsDict(testType: str = None,
@@ -137,7 +216,7 @@ def getParamsDict(testType: str = None,
                   storeResults: bool = True,
                   returnResults: bool = False,
                   compressMethod = 0,
-                  nSplits = 8) -> dict:
+                  nParts = 8) -> dict:
     '''
     Returns simple parameters dictionary needed in function\n
     decorated by `parallel`
@@ -147,4 +226,4 @@ def getParamsDict(testType: str = None,
             'storeResults': storeResults,
             'returnResults': returnResults,
             'compressMethod': compressMethod,
-            'nSplits': nSplits}
+            'nParts': nParts}

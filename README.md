@@ -20,32 +20,33 @@ Dataset containing >568 000 table images as well as corresponding HTML structure
 </details>
 
 ---
-# Processing
+# Parallel processing
 Due to amount of data greater than my 8GB RAM, `src/batchProcessing.py` file comes with `parallel` decorator which enables:
 - batch, parallel processing
-- auto dumping results to disk
+- auto dumping results and metadata to disk
 - behaviour parameterization
+- showing `tqdm` progress bar
 - input parameters validation <br>
 
-All this without need to change implementation of processing function <br>(except for first parameter that has to be `list` and the second one that has to be `dict` that specifies decorator behavior). <br>
+All this without need to change implementation[^1] of processing function <br>(except for first parameter that has to be `list` and the second one that has to be `dict` that specifies decorator behavior). <br>
 Example:
 
 
 ```python
 def process1(itemsToProcess):
-    # processing...
-    return processedItems
+    # linear processing...
+    return processedItems, otherReturnValue
 
 # ---------------------------------------- #
 
 @parallel
 def process2(itemsToProcess, params):
     # same processing as above...
-    return processedItems
+    return processedItems, otherReturnValue
 
 # ---------------------------------------- #
 
-# Wrong input parameters raise `WrongParameters` exception 
+# Wrong input parameter(s) raise `WrongParameters` exception 
 process2(5, 'foo')
 
 # Error message:
@@ -55,6 +56,16 @@ WrongParameters: process2(itemsToProcess, params):
 
 ```
 
-*due to multiprocessing, using exceptions concerning decorated function is limited to `try...except` block inside that function
+`WrongParameters` works with both args and kwargs passed in any order by using `errorhandler` decorator from `src/errorhandling.py` with parameters as `List[Argument]`.<br>
+`Argument` object enables specyfing function parameters types or valid values by their names or/and indexes in args.
 
+
+
+
+
+[^1]: Return value is the same until:<br>
+\- `params['returnResults'] == False`<br>
+\- function is used inside `try...except` block -> due to multiprocessing<br>
+\- function changes processed items order -> due to splitting data and processing separately<br>
+\- probably in some other edge cases
 
