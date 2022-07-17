@@ -17,6 +17,47 @@ class _WrongValue(Exception):
 # TODO: obsługa `name` i `argIndex` jako listy wartości 
 
 class Argument:
+    '''
+    Class that is needed to specify valid parameters for \n
+    `errorHandler` and `checkArguments` decorators
+    
+    # Parameters:
+    
+    All parameters are optional, but at least two of them \n
+    are needed to create instance
+    
+    - name: str
+        - argument name
+    - argType: type
+    - validValues: list
+    - argIndex: int
+        - argument index in args and kwargs
+    ---
+    # Note:
+    
+    To use with class method specify `validParameters` key as function `__qualname__`,\n
+    typically: `'<class name>.<function name>'`
+    
+    If used with class method, first argument (`self`) is ommited\n
+    and never checked. Example:
+    ```python
+    validValues = {
+        'Example.method' : [Argument(argType=int, argIndex=0)]
+    }
+    
+    class Example:
+        @checkParameters(validValues)
+        def method(self, firstParam: int, secondParam: str):
+            pass
+            
+    # `argIndex=0` concerns `'firstParam'` parameter
+    ```
+    Due to no easy way to determine whether function is class method or not\n
+    during class definition (bounding with class occurs later),\n
+    differentiation between common function and bounded one is based on checking\n
+    first argument name - only `'self'` is treated as bounded function\n
+    It does not matter when Arugments were defined without `argIndex` parameter
+    '''
     def __init__(self,
                  name: str = None,
                  argType: type = None,
@@ -88,6 +129,7 @@ class _Checker:
         self.kwargs = kwargs
     
     def checkParameters(self):
+        self.args = self.args if self.args[0] != 'self' else self.args[1:]
         nameInfoDict, retString = self._prepareArguments()
         for argName, (userArgVal, *argObjList) in nameInfoDict.items():
             for argObj in argObjList:
@@ -168,9 +210,13 @@ def errorHandler(validParameters):
                 decoratedFun = e.decoratedFunction
             
             parametersNames = [*inspect.signature(function if decoratedFun is None else decoratedFun).parameters]
-            raise WrongParameters(function.__name__, 
+            # In case of class methods `.__qualname__` gives '<class name>.<function name>',
+            # but gives also for example: 'parallel.<locals>.processInParallel' for decorator
+            # `.__name__` gives only '<function name>'
+            funName = function.__qualname__ if parametersNames[0] == 'self' else function.__name__
+            raise WrongParameters(funName,
                                   parametersNames, 
-                                  validParameters[function.__name__], 
+                                  validParameters[funName], 
                                   args, 
                                   kwargs,
                                   decoratedFunction=decoratedFun)
@@ -197,7 +243,3 @@ def checkParameters(validParameters):
             return function(*args, **kwargs)
         return modFun
     return checkParametersInner
-            
-            
-def dumpError(filePath, errorMessage):
-    dump(errorMessage, filePath)

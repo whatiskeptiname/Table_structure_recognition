@@ -25,7 +25,7 @@ Due to amount of data greater than my 8GB RAM, `src/batchProcessing.py` file com
 - batch, parallel processing
 - auto dumping results and metadata to disk
 - behaviour parameterization
-- showing `tqdm` progress bar
+- showing <a href=https://tqdm.github.io/>`tqdm`</a> progress bar
 - input parameters validation <br>
 
 All this without need to change implementation[^1] of processing function <br>(except for first parameter that has to be `list` and the second one that has to be `dict` that specifies decorator behavior). <br>
@@ -57,7 +57,7 @@ WrongParameters: process2(itemsToProcess, params):
 ```
 
 `WrongParameters` works with both args and kwargs passed in any order by using `errorhandler` decorator from `src/errorhandling.py` with parameters as `List[Argument]`.<br>
-`Argument` object enables specyfing function parameters types or valid values by their names or/and indexes in args.
+`Argument` object enables specyfing function parameters types or valid values by their names or/and indexes in args/kwargs.
 
 
 
@@ -65,7 +65,7 @@ WrongParameters: process2(itemsToProcess, params):
 
 [^1]: Return value is the same until:<br>
 \- `params['returnResults'] == False`<br>
-\- function is used inside `try...except` block -> due to multiprocessing<br>
+\- function is used inside `try...except` block and exception occures -> due to multiprocessing<br>
 \- function changes processed items order -> due to splitting data and processing separately<br>
 \- probably in some other edge cases
 

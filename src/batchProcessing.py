@@ -7,7 +7,7 @@ import numpy as np
 from tqdm import tqdm
 
 import src.fileNames as fileNames
-from src.errorHandling import Argument, errorHandler, WrongParameters, dumpError
+from src.errorHandling import Argument, errorHandler, WrongParameters
 
 
 validParameters = {
@@ -53,7 +53,8 @@ class _ParallelHelper:
         self.trialIndex = params.get('trialIndex')
         self.returnResults = params.get('returnResults', False)
         self.storeResults = params.get('storeResults', True)
-        self.compressMethod = params.get('compressMethod', 0)
+        self.compressMethod = params.get('compressMethod', None)
+        self.compressLevel = params.get('compressLevel', 3)
         self.nParts = params.get('nParts', 8)
         self.decoratedFunction = decoratedFunction
     
@@ -106,18 +107,20 @@ class _ParallelHelper:
         if not all(item[1] for item in parallelReturn):
             failedList = [item[0] for item in parallelReturn if not item[1]]
             warnings.warn(f'{len(failedList)}/{len(parallelReturn)} processes failed.\
-                        \nFailed save data to files: {failedList}')
+                        \nFailed saving data to files: {failedList}')
             
         if not self.returnResults:
             return None
         successfulResults = [item[2] for item in parallelReturn if item[1] and item[2] is not None]
+        self._params['processedItems'] = len(successfulResults)
         try:
             if len(successfulResults[0]) > 1:
                 # `function` returns more than one value
                successfulResults = self._reorderResults(successfulResults)
-        except:
+        except TypeError:
             # `function` does not return list -> returned object has no len()
             pass
+        return successfulResults
         
     def _getTotalSize(self):
         totalSize = 0
@@ -150,7 +153,9 @@ def parallel(function):
             - folder name in `testType`, optional if `'storeResults': False`
         - `'returnResults'`: `bool` [optional], default: `False`
         - `'storeResults'`: `bool` [optional], default: `True`
-        - `'compressMethod'`: `int`/`str` [optional], default: `0`
+        - `'compressMethod'`: `str` [optional], default: `None`
+            - parameter `compress` in `joblib.dump`
+        - `'compressLevel'`: `int` [optional], default: `3`
             - parameter `compress` in `joblib.dump`
         - `'nParts'`: int [optional], default: `8`
             - amount of splits on processed data, `nParts-1` splits are equal
@@ -194,16 +199,28 @@ def loadTrial(testType, trialIndex, firstN = None) -> tuple:
     
     # Returns:\n
     `tuple`: (data, metadata) if 'metadata' file was found in trial folder\n
-    `tuple`: (data, None) if 'metadata' file was not found in trial folder
+    `tuple`: (data, `None`) if 'metadata' file was not found in trial folder
     '''
-    trialPath = fileNames.getTestsTrialDir(testType, trialIndex)
-    filesToLoad = [file for file in os.listdir(trialPath) if file != 'metadata' and not file.startswith('error')]
-    filesToLoad = filesToLoad if firstN is None else filesToLoad[:firstN]
-    data = [y for x in [load(f'{trialPath}/{fileToLoad}') for fileToLoad in filesToLoad] for y in x]
-    metadata = None
-    if os.path.exists(f'{trialPath}/metadata'):
-        metadata = load(f'{trialPath}/metadata')
+    data = loadTrialData(testType, trialIndex)
+    metadata = loadTrialMetadata(testType, trialIndex)
     return data, metadata
+
+def loadTrialData(testType, trialIndex, firstN = None):
+    trialPath = fileNames.getTestsTrialDir(testType, trialIndex)
+    filesToLoad = [file for file in os.listdir(trialPath)
+                   if file != 'metadata'
+                   and not file.startswith('error')]
+    filesToLoad = filesToLoad[:firstN]
+    data = [y for x in [load(f'{trialPath}/{fileToLoad}') for fileToLoad in filesToLoad] for y in x]
+    return data
+    
+
+def loadTrialMetadata(testType, trialIndex):
+    try:
+        filePath = fileNames.getTestsTrialDir(testType, trialIndex, 'metadata')
+        return load(filePath)
+    except FileNotFoundError:
+        return None
 
 def loadErrors(testType, trialIndex):
     trialPath = fileNames.getTestsTrialDir(testType, trialIndex)
@@ -215,7 +232,8 @@ def getParamsDict(testType: str = None,
                   trialIndex: int = None,
                   storeResults: bool = True,
                   returnResults: bool = False,
-                  compressMethod = 0,
+                  compressMethod = None,
+                  compressLevel = 0,
                   nParts = 8) -> dict:
     '''
     Returns simple parameters dictionary needed in function\n
@@ -226,4 +244,5 @@ def getParamsDict(testType: str = None,
             'storeResults': storeResults,
             'returnResults': returnResults,
             'compressMethod': compressMethod,
+            'compressLevel': compressLevel,
             'nParts': nParts}
