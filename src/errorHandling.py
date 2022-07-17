@@ -35,7 +35,7 @@ class Argument:
     ---
     # Note:
     
-    To use with class method specify `validParameters` key as function `__qualname__`,\n
+    To use with class method specify `validParameters` key as function's `__qualname__`,\n
     typically: `'<class name>.<function name>'`
     
     If used with class method, first argument (`self`) is ommited\n
@@ -129,7 +129,6 @@ class _Checker:
         self.kwargs = kwargs
     
     def checkParameters(self):
-        self.args = self.args if self.args[0] != 'self' else self.args[1:]
         nameInfoDict, retString = self._prepareArguments()
         for argName, (userArgVal, *argObjList) in nameInfoDict.items():
             for argObj in argObjList:
@@ -214,6 +213,7 @@ def errorHandler(validParameters):
             # but gives also for example: 'parallel.<locals>.processInParallel' for decorator
             # `.__name__` gives only '<function name>'
             funName = function.__qualname__ if parametersNames[0] == 'self' else function.__name__
+            args = args if parametersNames[0] != 'self' else args[1:]
             raise WrongParameters(funName,
                                   parametersNames, 
                                   validParameters[funName], 
