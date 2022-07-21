@@ -3,11 +3,13 @@ import os
 import warnings
 import traceback
 import time
+import datetime
 import numpy as np
 from tqdm import tqdm
 
 import src.fileNames as fileNames
 from src.errorHandling import Argument, errorHandler, WrongParameters
+from src.storage import Storage
 
 
 validParameters = {
@@ -48,71 +50,119 @@ class _ParallelHelper:
     '''
     def __init__(self, params, decoratedFunction):
         self.startTime = time.time()
-        self._params = params
+        self._params = params.copy()
         self.testType = params.get('testType')
         self.trialIndex = params.get('trialIndex')
         self.returnResults = params.get('returnResults', False)
         self.storeResults = params.get('storeResults', True)
-        self.compressMethod = params.get('compressMethod', None)
+        self.compressMethod = params.get('compressMethod', 'zlib')
         self.compressLevel = params.get('compressLevel', 3)
         self.nParts = params.get('nParts', 8)
         self.decoratedFunction = decoratedFunction
+        
+        self._dumpCompression = self._getDumpCompression()
+        self._params['parallelData'] = {}
     
     @property
     def params(self):
-        self._params['totalSize'] = self._getTotalSize()
-        self._params['totalTime'] = round(time.time() - self.startTime, 3)
+        self._addMetadata('functionName', self.decoratedFunction.__name__)
+        self._addMetadata('totalSize', self._getTotalSize())
+        self._addMetadata('date', self._getDate())
+        self._addMetadata('totalTime', round(time.time() - self.startTime, 3))
         return self._params
+    
+    def _addMetadata(self, paramName, value):
+        self._params['parallelData'][paramName] = value
+        
+    def _getDate(self):
+        return datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S.%f')
 
     def splitData(self, data):
         # TODO: better data splitting
         nRecordsInSplit = len(data)/(self.nParts-1)
         return [data[index:index+int(nRecordsInSplit)] for index in range(0, len(data), int(nRecordsInSplit))]
     
+    def _getDumpCompression(self):
+        if self.compressMethod and self.compressLevel:
+            return (self.compressMethod, self.compressLevel)
+        return self.compressMethod or self.compressLevel
+    
     def process(self, dumpfileName):
         '''
         Main method of `_ParallelHelper` that is responsible for running decorated function
+        
+        Returns `tuple` with:
+            - dump file name: `str`
+            - success status: `bool`
+                - `True` when success
+                - `False` when any error
+            - results from decorated function:
+                - `list` if `params['returnResults'] == True`
+                - `None` if `params['returnResults'] == False`
         '''
         def modFun(*args, **kwargs):
-            # dumpfileName = args[-1]
-            # args = args[:-1]
             try:
                 results = self.decoratedFunction(*args, **kwargs)
             except:
-                self.dumpData(traceback.format_exc(), f'error{dumpfileName}')
+                error = {
+                    'testType' : self.testType,
+                    'trialIndex' : self.trialIndex,
+                    'functionName' : self.decoratedFunction.__name__,
+                    'date' : self._getDate(),
+                    'traceback': traceback.format_exc()
+                }
+                Storage.saveError(error)
                 return dumpfileName, False, None
-            self.dumpData(results, dumpfileName)
+            
+            if self.storeResults:
+                Storage.saveData(results, 
+                                 self._getTrialFolder(dumpfileName),
+                                 self._dumpCompression)
             if self.returnResults:
                 return dumpfileName, True, results
             return dumpfileName, True, None
         return modFun
-    
-    def dumpData(self, data, fileName):
-        if not self.storeResults:
-            return
-        storeLocation = self.getTrialFolder(fileName)
-        dump(data, storeLocation, compress=self.compressMethod)
         
-    def getTrialFolder(self, fileName = ''):
+    def _getTrialFolder(self, fileName = ''):
         try:
             return fileNames.getTestsTrialDir(self.testType, self.trialIndex, fileName)
         except:
             raise WrongParameters(decoratedFunction=self.decoratedFunction)
         
     
-    def getSuccessfulResults(self, parallelReturn):
+    def getSuccessfulResults(self, parallelReturn, nItemsInParts):
+        # Based on `self.process`:
         # parallelReturn[index][0] -> fileName
         # parallelReturn[index][1] -> returnStatus
         # parallelReturn[index][2] -> results
-        if not all(item[1] for item in parallelReturn):
-            failedList = [item[0] for item in parallelReturn if not item[1]]
+        
+        dumpNames, returnStatuses, results = zip(*parallelReturn)
+        
+        # errors checking
+        nFailedItems = 0
+        if not all(returnStatuses):
+            failedList, nFailedItems = zip(*[(fileName, nItems) 
+                                             for fileName, returnStatus, nItems 
+                                             in zip(dumpNames, returnStatuses, nItemsInParts) 
+                                             if not returnStatus])
+            nFailedItems = sum(nFailedItems)    
             warnings.warn(f'{len(failedList)}/{len(parallelReturn)} processes failed.\
                         \nFailed saving data to files: {failedList}')
-            
+ 
+        # saving metadata
+        self._addMetadata('nProcessedItems', sum(nItemsInParts) - nFailedItems)
+        self._addMetadata('nItems', sum(nItemsInParts))
+        
+        # getting only successfuly processed results
         if not self.returnResults:
             return None
-        successfulResults = [item[2] for item in parallelReturn if item[1] and item[2] is not None]
-        self._params['processedItems'] = len(successfulResults)
+        successfulResults = [result
+                             for result, returnStatus 
+                             in zip(results, returnStatuses) 
+                             if returnStatus]
+        
+        # transposing and concatenating results if more than value if returned
+        # by processing function
         try:
             if len(successfulResults[0]) > 1:
                 # `function` returns more than one value
@@ -124,7 +174,7 @@ class _ParallelHelper:
         
     def _getTotalSize(self):
         totalSize = 0
-        for file in os.scandir(self.getTrialFolder()):
+        for file in os.scandir(self._getTrialFolder()):
             if file.name != 'metadata':
                 totalSize += os.path.getsize(file)
         return totalSize
@@ -153,7 +203,7 @@ def parallel(function):
             - folder name in `testType`, optional if `'storeResults': False`
         - `'returnResults'`: `bool` [optional], default: `False`
         - `'storeResults'`: `bool` [optional], default: `True`
-        - `'compressMethod'`: `str` [optional], default: `None`
+        - `'compressMethod'`: `str` [optional], default: `zlib`
             - parameter `compress` in `joblib.dump`
         - `'compressLevel'`: `int` [optional], default: `3`
             - parameter `compress` in `joblib.dump`
@@ -185,55 +235,20 @@ def parallel(function):
         parallelReturn = TqdmParallel(info.nParts, cpu_count())(
                                         delayed(info.process(str(fileIndex)))
                                         (toProcess, *args[1:], **kwargs) for fileIndex, toProcess in enumerate(data))
-        
-        successfulResults = info.getSuccessfulResults(parallelReturn)
-        info.dumpData(info.params, 'metadata')
+
+        nItemsInParts = [len(part) for part in data]
+        successfulResults = info.getSuccessfulResults(parallelReturn, nItemsInParts)
+        Storage.saveMetadata(info.params)
         return successfulResults
         
     return processInParallel
-
-
-def loadTrial(testType, trialIndex, firstN = None) -> tuple:
-    '''
-    Loads data stored by `parallel`.
-    
-    # Returns:\n
-    `tuple`: (data, metadata) if 'metadata' file was found in trial folder\n
-    `tuple`: (data, `None`) if 'metadata' file was not found in trial folder
-    '''
-    data = loadTrialData(testType, trialIndex)
-    metadata = loadTrialMetadata(testType, trialIndex)
-    return data, metadata
-
-def loadTrialData(testType, trialIndex, firstN = None):
-    trialPath = fileNames.getTestsTrialDir(testType, trialIndex)
-    filesToLoad = [file for file in os.listdir(trialPath)
-                   if file != 'metadata'
-                   and not file.startswith('error')]
-    filesToLoad = filesToLoad[:firstN]
-    data = [y for x in [load(f'{trialPath}/{fileToLoad}') for fileToLoad in filesToLoad] for y in x]
-    return data
-    
-
-def loadTrialMetadata(testType, trialIndex):
-    try:
-        filePath = fileNames.getTestsTrialDir(testType, trialIndex, 'metadata')
-        return load(filePath)
-    except FileNotFoundError:
-        return None
-
-def loadErrors(testType, trialIndex):
-    trialPath = fileNames.getTestsTrialDir(testType, trialIndex)
-    filesToLoad = [file for file in os.listdir(trialPath) if file.startswith('error')]
-    return [load(f'{trialPath}/{fileToLoad}') for fileToLoad in filesToLoad]
-
 
 def getParamsDict(testType: str = None,
                   trialIndex: int = None,
                   storeResults: bool = True,
                   returnResults: bool = False,
-                  compressMethod = None,
-                  compressLevel = 0,
+                  compressMethod = 'zlib',
+                  compressLevel = 3,
                   nParts = 8) -> dict:
     '''
     Returns simple parameters dictionary needed in function\n

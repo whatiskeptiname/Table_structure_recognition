@@ -198,8 +198,8 @@ class WrongParameters(Exception):
 
 def errorHandler(validParameters):
     '''
-    Helper decorator to make raised by function `WrongParameters` \n
-    exception more precise
+    Helper decorator to make exception raised by `WrongParameters` \n
+    more precise
     '''
     def errorHandlerInner(function):
         def modFun(*args, **kwargs):
@@ -209,9 +209,9 @@ def errorHandler(validParameters):
                 decoratedFun = e.decoratedFunction
             
             parametersNames = [*inspect.signature(function if decoratedFun is None else decoratedFun).parameters]
-            # In case of class methods `.__qualname__` gives '<class name>.<function name>',
-            # but gives also for example: 'parallel.<locals>.processInParallel' for decorator
-            # `.__name__` gives only '<function name>'
+            # In case of class, method `.__qualname__` returns '<class name>.<function name>',
+            # but for decorator returns, for example: 'parallel.<locals>.processInParallel'
+            # `.__name__` returns only '<function name>'
             funName = function.__qualname__ if parametersNames[0] == 'self' else function.__name__
             args = args if parametersNames[0] != 'self' else args[1:]
             raise WrongParameters(funName,
