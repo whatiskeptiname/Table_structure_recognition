@@ -59,8 +59,9 @@ WrongParameters: process2(itemsToProcess, params):
 `WrongParameters` works with both args and kwargs passed in any order by using `errorhandler` decorator from `src/errorhandling.py` with parameters as `List[Argument]`.<br>
 `Argument` object enables specyfing function parameters types or valid values by their names or/and indexes in args/kwargs.
 
+<!-- # Image displaying
 
-
+<img src="https://drive.google.com/uc?export=view&id=12tfr_kQpGw2Qdngmq9Nbkjoe6fzf6bgs" width=60%> -->
 
 
 [^1]: Return value is the same until:<br>
