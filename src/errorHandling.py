@@ -62,12 +62,14 @@ class Argument:
                  name: str = None,
                  argType: type = None,
                  validValues: list = None,
-                 argIndex: int = None):
+                 argIndex: int = None,
+                 nullable: bool = False):
         self._checkParameters(name, argType, validValues, argIndex)
         self._name = name
         self._argType = argType
         self._validValues = validValues
         self._argIndex = argIndex
+        self.nullable = nullable
         
     def _checkParameters(self, name, argType, validValues, argIndex):            
         if sum([item is not None for item in [name, argType, validValues, argIndex]]) < 2:
@@ -96,7 +98,11 @@ class Argument:
             self._checkValidValues(userValue)
                 
     def _checkArgType(self, userValue):
-        if self._argType is not type(userValue):
+        if isinstance(self._argType, list):
+            if type(userValue) not in self._argType:
+                raise _WrongType
+            return
+        if type(userValue) is not self._argType:
             raise _WrongType
     
     def _checkValidValues(self, userValue):
@@ -152,7 +158,12 @@ class _Checker:
         argumentsByIndex = {item.argIndex : item for item in self.validParameters if item.argIndex is not None}
         
         for name, argObj in argumentsByName.items():
-            nameInfoDict[name].append(argObj)
+            try:
+                nameInfoDict[name].append(argObj)
+            except KeyError:
+                # argument with such name was not passed
+                if not argObj.nullable:
+                    retString.append(f"- Argument '{name}' not passed, but has specified default value -> consider adding `nullable = True` parameter in `Argument`")
         for index, argObj in argumentsByIndex.items():
             if len(usedParametersNames) <= index:
                 neededType = f' Needed type: {argObj.argType.__name__}.' if argObj.argType is not None else ''
