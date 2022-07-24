@@ -1,10 +1,10 @@
 import cv2
-from cv2 import threshold
 import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 from src.errorHandling import checkParameters, Argument
 from types import FunctionType
+from typing import List, Tuple
 
 PKey = 112
 escKey = 27
@@ -23,24 +23,26 @@ def show(image,
          delay: int = 0, 
          graphFunctions: list = None,
          hiddenGraphFunction: list = None,
-         darkenWhitePixelsBy: int = 60):
+         darkenWhitePixelsBy: int = 40):
     if nameParams is None:
         nameParams = {}
     hiddenGraphs = []
     if hiddenGraphFunction is not None:
         hiddenGraphs = _addHiddenGraphs(hiddenGraphFunction, image, darkenWhitePixelsBy)
+    
     if np.unique(image).size == 2:
         image = 255*image
     if graphFunctions is not None:
+        if type(graphFunctions) is not list:
+            graphFunctions = [graphFunctions]
         image = _addGraphs(graphFunctions, image)
         
-    image = _darkenTheseWhitePixels(image, darkenWhitePixelsBy)
+    image = _darkenTheseWhitePixels(image, 30, darkenWhitePixelsBy)
     cv2.imshow('image', image)
     mouseCallbackParameters = {
-        'image' : image,
         'nameParams' : nameParams,
-        'changeableImages' : [(image, (0,0))] + hiddenGraphs,
-        'nextChangeableIndex' : 1 % len(hiddenGraphs)
+        'images' : [(image, (0,0))] + hiddenGraphs,
+        'nextImageIndex' : 1 % (len(hiddenGraphs) + 1)
     }
     cv2.setMouseCallback('image', _mouseEvent, mouseCallbackParameters)
     if nameParams is not None:
@@ -51,11 +53,10 @@ def show(image,
     cv2.destroyAllWindows()
     
 def _mouseEvent(event, x, y, flags, params):
-    image = params['image']
-    try:
-        color = image[y,x,0]
-    except IndexError:
-        color = image[y,x]
+    images = params['images']
+    nextImageIndex = params['nextImageIndex']
+    
+    color = _getColor(images, (nextImageIndex-1) % len(images), y, x)
 
     if event == cv2.EVENT_MOUSEMOVE:
         newImgName = params['nameParams'].copy()
@@ -66,29 +67,43 @@ def _mouseEvent(event, x, y, flags, params):
         cv2.setWindowTitle('image', _createImgNameFromDict(newImgName))
         
     if event == cv2.EVENT_LBUTTONDOWN:
-        changeableImages = params['changeableImages']
-        nextChangeableIndex = params['nextChangeableIndex']
-        changeableImage, startCoords = changeableImages[nextChangeableIndex]
-        tempImage = image.copy()
+        nextImage, startCoords = images[nextImageIndex]
+        tempImage = images[0][0].copy()
         tempImage[
-            startCoords[0]:startCoords[0] + changeableImage.shape[0],
-            startCoords[1]:startCoords[1] + changeableImage.shape[1]
-            ] = changeableImage
+            startCoords[0]:startCoords[0] + nextImage.shape[0],
+            startCoords[1]:startCoords[1] + nextImage.shape[1]
+            ] = nextImage
         cv2.imshow('image', tempImage)
-        params['nextChangeableIndex'] = (nextChangeableIndex + 1) % len(changeableImages)
+        params['nextImageIndex'] = (nextImageIndex + 1) % len(images)
 
 def _createImgNameFromDict(dict):
     return '; '.join(f'{key}: {value}' for key, value in dict.items() if value is not None)
 
-def _darkenTheseWhitePixels(image: np.array, by: int = 60):
-        return cv2.threshold(image, 30, 255-by, cv2.THRESH_BINARY)[1]
+def _darkenTheseWhitePixels(image: np.array, below: int,  by: int = 40):
+    if not by:
+        return image
+    return cv2.threshold(image, below, 255-by, cv2.THRESH_BINARY)[1]
+    
+def _getColor(images, currentImageIndex, y, x):
+    # edge case when image is so small but window needs to be bigger to fit in buttons
+    # and x, y are out of image.shape
+    color = 0
+    try:
+        color = images[0][0][y,x]
+        color = images[0][0][y,x,0]
+        color = images[currentImageIndex][0][y,x]
+        color = images[currentImageIndex][0][y,x,0]
+    except IndexError:
+        pass
+    return color
 
 @checkParameters(validParameters)
 def showInLoop(images: list, 
                delay: int = 0, 
                nameParams: dict = None, 
                graphFunctions = None,
-               hiddenGraphFunction = None):
+               hiddenGraphFunction = None,
+               darkenWhitePixelsBy: int = 40):
     '''
     Function to enable showing many images with graphs\n
     and hidden graphs available on clik in a loop.\n
@@ -105,6 +120,7 @@ def showInLoop(images: list,
         - list of functions that create graphs based on image and insert it into that image
     - hiddedGraphFunction: `function`
         - function to create images that alter displayed image after clicking on it
+    - darkenWhitePixelsBy: `int`
     
     # Note:
     - press 'p' to display previous image
@@ -138,7 +154,8 @@ def showInLoop(images: list,
                               nameParams = nameParams,
                               delay = delay,
                               graphFunctions = graphFunctions,
-                              hiddenGraphFunction = hiddenGraphFunction)
+                              hiddenGraphFunction = hiddenGraphFunction,
+                              darkenWhitePixelsBy = darkenWhitePixelsBy)
             if pressedKey == PKey:
                 index = (index-1)%nImages
                 continue
@@ -154,7 +171,11 @@ def _addGraphs(graphFunctions: list, image: np.array) -> np.array:
     return image
             
 def _addHiddenGraphs(hiddenGraphFunction: list, image: np.array, darkenWhitePixelsBy: int) -> list:
-    return hiddenGraphFunction(image, darkenWhitePixelsBy)
+    try:
+        return hiddenGraphFunction(image)
+    except TypeError:
+        # wrong amount of parameters
+        return hiddenGraphFunction(image, darkenWhitePixelsBy)
 
 def addPlots(image: np.array) -> np.array:
     '''
@@ -209,5 +230,24 @@ def addHiddenPlots(image: np.array, darkenWhitePixelsBy: int) -> tuple:
     kindOfSkeleton = np.matmul(rowValues[:, None], columnValues[None, :])
     kindOfSkeleton = (255*kindOfSkeleton/np.max(kindOfSkeleton)).astype('uint8')
     kindOfSkeleton = cv2.cvtColor(kindOfSkeleton, cv2.COLOR_GRAY2BGR)
-    thresholded = _darkenTheseWhitePixels(kindOfSkeleton, darkenWhitePixelsBy)
-    return [(kindOfSkeleton, (0,0)), (thresholded, (0,0))]
+    thresholded = [(_darkenTheseWhitePixels(kindOfSkeleton, value, darkenWhitePixelsBy), (0,0)) for value in range(0,50,10)]
+    return [(kindOfSkeleton, (0,0))] + thresholded
+
+
+def showBboxOnImage(image: np.array, 
+                    bboxList: List[Tuple[int, int]],
+                    cumulative: bool = False, 
+                    **kwargs):
+    if cumulative:
+        bboxImage = image.copy()
+        for bbox in bboxList:
+            bboxImage = cv2.rectangle(215*bboxImage, *bbox, (0,0,0), 2)
+        hiddenImage = 255*image if kwargs.get('graphFunctions') is None else cv2.cvtColor(255*image, cv2.COLOR_GRAY2BGR)
+        show(bboxImage, 
+             hiddenGraphFunction = lambda img: [(hiddenImage, (0,0))],
+             **kwargs)
+        return
+    showInLoop([cv2.rectangle(215*image.copy(), *bbox, (0,0,0), 2)
+                for bbox 
+                in bboxList],
+               **kwargs)

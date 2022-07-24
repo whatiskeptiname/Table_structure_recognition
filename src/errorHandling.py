@@ -141,7 +141,12 @@ class _Checker:
                 try:
                     argObj.checkValidity(userArgVal)
                 except _WrongType:
-                    retString.append(f'''- {argName}: {userArgVal.join("''") if isinstance(userArgVal, str) else userArgVal} is not {argObj.argType.__name__}''')  
+                    try:
+                        objArgTypeName = argObj.argType.__name__
+                    except AttributeError:
+                        # 'list' object has no attribute '__name__'
+                        objArgTypeName = '[' + ', '.join(argType.__name__ for argType in argObj.argType) + ']'
+                    retString.append(f'''- {argName}: {userArgVal.join("''") if isinstance(userArgVal, str) else userArgVal} is not {objArgTypeName}''')  
                 except _WrongValue:
                     retString.append(f"""- {argName}: {userArgVal.join("''") if isinstance(userArgVal, str) else userArgVal} not in {argObj.validValues}""")
         funName = self.functionName if self.decoratedFun is None else self.decoratedFun.__name__
