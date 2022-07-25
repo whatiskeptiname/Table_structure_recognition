@@ -16,8 +16,6 @@ def _splitOnCells(image: np.array,
     '''
     Recursive function to make more precise splits the deeper it goes
     '''
-    # debugging and splits visualization
-    # onlySkel.append(image)
     
     # prepare all common stuff
     columnValues = image.sum(axis=0)
@@ -138,7 +136,7 @@ def getEmptyLineSplitPoints(columnValues: np.array,
                             imageShape: tuple,
                             maxFilledInEmptyLine: int = 3,
                             minEmptyLineDistanceFromBorder: tuple = (5,5),
-                            minEmptyLineWidth: tuple = (14,3),
+                            minEmptyLineWidth: tuple = (14,4),
                             maxMissingToBeStillFull = 5) -> Tuple[Union[List[int], None]]:
     '''
     Function to find table split points based on empty lines

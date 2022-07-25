@@ -240,13 +240,15 @@ def showBboxOnImage(image: np.array,
                     **kwargs):
     if cumulative:
         bboxImage = image.copy()
-        for bbox in bboxList:
-            bboxImage = cv2.rectangle(215*bboxImage, *bbox, (0,0,0), 2)
+        for index, bbox in enumerate(bboxList):
+            bboxImage = cv2.rectangle(bboxImage, *bbox, (0,0,0), 2)
         hiddenImage = 255*image if kwargs.get('graphFunctions') is None else cv2.cvtColor(255*image, cv2.COLOR_GRAY2BGR)
-        show(bboxImage, 
+        
+        show(215*bboxImage, 
              hiddenGraphFunction = lambda img: [(hiddenImage, (0,0))],
              **kwargs)
         return
+    
     showInLoop([cv2.rectangle(215*image.copy(), *bbox, (0,0,0), 2)
                 for bbox 
                 in bboxList],
