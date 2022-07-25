@@ -2,9 +2,13 @@
 
 ### Converting tabular data from .png images to HTML/LaTeX equivalent using image processing tools
 
-*So far there are only preparations made, no image processing included
-
 ---
+# Work progress:
+
+Current version is able to recognize basic table structures as well as some harder (much harder) ones, but needs more (like greater amount) and more complex parameters to return correct results in every situation.
+More info <a href="https://github.com/shentio2/Table_structure_recognition/tree/main/progression">here</a> in progression folder
+
+
 # Data origin:
 <details>
 <summary>SciTSR</summary>
