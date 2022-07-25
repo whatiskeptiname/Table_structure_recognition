@@ -18,11 +18,12 @@
 - Some incorrectly recognized tables:
     - due to wrong order of operations (changing order would result in same errors in different cases)
 
-    <img src="gifs/38.gif" width=49%>
+    <img src="gifs/38.gif" width=49%><br>
     <img src="gifs/72.gif" width=49%>
 
     - due to not precise enough parameters
-    <img src="gifs/41.gif" width=49%>
+    
+    <img src="gifs/41.gif" width=49%><br>
     <img src="gifs/89.gif" width=49%>
 
 
