@@ -6,11 +6,13 @@ import time
 import datetime
 import numpy as np
 from tqdm import tqdm
+from types import FunctionType
 
 import src.fileNames as fileNames
 from src.errorHandling import Argument, errorHandler, WrongParameters
 from src.storage import Storage
 
+DEBUG_MODE = False
 
 validParameters = {
     'processInParallel' : [Argument(argType=list, argIndex=0),
@@ -48,7 +50,7 @@ class _ParallelHelper:
     Helper class that stores parameters and methods used in `src.batchProcessing.parallel`.\n
     Used and written only for `parallel`
     '''
-    def __init__(self, params, decoratedFunction):
+    def __init__(self, params: dict, decoratedFunction: FunctionType):
         self.startTime = time.time()
         self._params = params.copy()
         self.testType = params.get('testType')
@@ -219,18 +221,18 @@ def parallel(function):
     If any of processing units fails, this function \n
     shows accumulated warning and continues
     '''
-    @errorHandler(validParameters)
+    @errorHandler(validParameters, DEBUG_MODE)
     def processInParallel(*args, **kwargs):
         try:
             data = args[0]
             params = args[1]
             info = _ParallelHelper(params, function)
             data = info.splitData(data)
-        except (IndexError, AttributeError, TypeError):
+        except (IndexError, AttributeError, TypeError) as e:
             # `IndexError` when there are not enough args
             # `AttributeError` when `params` is not dict
             # `TypeError` when `data` has no len()
-            raise WrongParameters(decoratedFunction=function)
+            raise WrongParameters(decoratedFunction=function, originalTraceback = e.__traceback__)
         
         parallelReturn = TqdmParallel(info.nParts, cpu_count())(
                                         delayed(info.process(str(fileIndex)))

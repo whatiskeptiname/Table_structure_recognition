@@ -1,6 +1,6 @@
 from typing import Any
 import inspect
-from joblib import dump
+import traceback
 
 class _WrongType(Exception):
     '''
@@ -193,7 +193,13 @@ class WrongParameters(Exception):
                  args: tuple = None,
                  kwargs: dict = None,
                  readyErrorMessage: str = None,
-                 decoratedFunction: str = None):
+                 decoratedFunction: str = None,
+                 originalTraceback = None):
+        self.originalTraceback = originalTraceback
+        if originalTraceback is not None:
+            traceback.clear_frames(self.__traceback__)
+            self.__traceback__ = originalTraceback
+        
         if readyErrorMessage is not None:
             super().__init__(readyErrorMessage)
             
@@ -212,7 +218,7 @@ class WrongParameters(Exception):
         super().__init__(self.checker.checkParameters())
 
 
-def errorHandler(validParameters):
+def errorHandler(validParameters, debugMode = False):
     '''
     Helper decorator to make exception raised by `WrongParameters` \n
     more precise
@@ -224,18 +230,19 @@ def errorHandler(validParameters):
             except WrongParameters as e:
                 decoratedFun = e.decoratedFunction
             
-            parametersNames = [*inspect.signature(function if decoratedFun is None else decoratedFun).parameters]
-            # In case of class, method `.__qualname__` returns '<class name>.<function name>',
-            # but for decorator returns, for example: 'parallel.<locals>.processInParallel'
-            # `.__name__` returns only '<function name>'
-            funName = function.__qualname__ if parametersNames[0] == 'self' else function.__name__
-            args = args if parametersNames[0] != 'self' else args[1:]
-            raise WrongParameters(funName,
-                                  parametersNames, 
-                                  validParameters[funName], 
-                                  args, 
-                                  kwargs,
-                                  decoratedFunction=decoratedFun)
+                parametersNames = [*inspect.signature(function if decoratedFun is None else decoratedFun).parameters]
+                # In case of class, method `.__qualname__` returns '<class name>.<function name>',
+                # but for decorator returns, for example: 'parallel.<locals>.processInParallel'
+                # `.__name__` returns only '<function name>'
+                funName = function.__qualname__ if parametersNames[0] == 'self' else function.__name__
+                args = args if parametersNames[0] != 'self' else args[1:]
+                raise WrongParameters(funName,
+                                    parametersNames, 
+                                    validParameters[funName], 
+                                    args, 
+                                    kwargs,
+                                    decoratedFunction=decoratedFun
+                                    ).with_traceback(e.originalTraceback if debugMode else None) from None
         return modFun
     return errorHandlerInner
 

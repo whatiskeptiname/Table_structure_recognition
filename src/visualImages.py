@@ -77,7 +77,11 @@ def _mouseEvent(event, x, y, flags, params):
         params['nextImageIndex'] = (nextImageIndex + 1) % len(images)
 
 def _createImgNameFromDict(dict):
-    return '; '.join(f'{key}: {value}' for key, value in dict.items() if value is not None)
+    atFirst = ['index', 'coords', 'color']
+    nameElements = [f'{item}: {dict.get(item)}' for item in atFirst if dict.get(item) is not None]
+    nameElements.extend([f'{key}: {value}' for key, value in dict.items() if key not in atFirst])
+    return '; '.join(nameElements)
+    # return '; '.join(f'{key}: {value}' for key, value in dict.items() if value is not None)
 
 def _darkenTheseWhitePixels(image: np.array, below: int,  by: int = 40):
     if not by:
@@ -136,33 +140,47 @@ def showInLoop(images: list,
                hiddenGraphFunction=addHiddenPlots)
                
     # that shows images in loop, each with associated graph and skeleton that
-    # show after clicking on image
+    # shows after clicking on image
     ```
     '''
     if type(graphFunctions) is not list and graphFunctions is not None:
         graphFunctions = [graphFunctions]
     if nameParams is None:
         nameParams = {}
+    nameParams = _prepareNameParams(nameParams, len(images))
     nImages = len(images)
     while True:
         index = 0
         while index < nImages:
             image = images[index]
-            nameParams['index'] = index
+            try:
+                currentNameParams = dict([(key, value[index]) for key, value in nameParams.items()])
+            except IndexError as e:
+                # list index out of range
+                cv2.destroyAllWindows()
+                raise IndexError('unequal amount of images and name params') from None
             pressedKey = show(image,
-                              destroy = False,
-                              nameParams = nameParams,
-                              delay = delay,
-                              graphFunctions = graphFunctions,
-                              hiddenGraphFunction = hiddenGraphFunction,
-                              darkenWhitePixelsBy = darkenWhitePixelsBy)
-            if pressedKey == PKey:
+                                destroy = False,
+                                nameParams = currentNameParams,
+                                delay = delay,
+                                graphFunctions = graphFunctions,
+                                hiddenGraphFunction = hiddenGraphFunction,
+                                darkenWhitePixelsBy = darkenWhitePixelsBy)
+            if pressedKey == 112:
                 index = (index-1)%nImages
                 continue
-            if pressedKey == escKey:
+            if pressedKey == 27:
                 cv2.destroyAllWindows()
                 return
             index += 1
+            
+def _prepareNameParams(nameParams, nImages):
+    for key, value in nameParams.items():
+        if not isinstance(value, list):
+            nameParams[key] = [value] * nImages
+    if nameParams.get('index') is None:
+        nameParams['index'] = range(nImages)
+    return nameParams
             
             
 def _addGraphs(graphFunctions: list, image: np.array) -> np.array:
@@ -241,15 +259,19 @@ def showBboxOnImage(image: np.array,
     if cumulative:
         bboxImage = image.copy()
         for index, bbox in enumerate(bboxList):
-            bboxImage = cv2.rectangle(bboxImage, *bbox, (0,0,0), 2)
+            bboxImage = cv2.rectangle(bboxImage, bbox[:2], bbox[2:], (0,0,0), 2)
         hiddenImage = 255*image if kwargs.get('graphFunctions') is None else cv2.cvtColor(255*image, cv2.COLOR_GRAY2BGR)
         
         show(215*bboxImage, 
              hiddenGraphFunction = lambda img: [(hiddenImage, (0,0))],
              **kwargs)
         return
-    
-    showInLoop([cv2.rectangle(215*image.copy(), *bbox, (0,0,0), 2)
+        
+    if kwargs.get('nameParams') is None:
+        kwargs['nameParams'] = {}
+    if kwargs['nameParams'].get('bbox') is None:
+        kwargs['nameParams']['bbox'] = bboxList
+    showInLoop([cv2.rectangle(215*image.copy(), bbox[:2], bbox[2:], (0,0,0), 2)
                 for bbox 
                 in bboxList],
                **kwargs)

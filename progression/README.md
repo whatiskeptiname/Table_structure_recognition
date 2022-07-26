@@ -12,7 +12,7 @@
 <img src="gifs/13.gif" width=49%>
 
 
-
+---
 ## - Negatives
 
 - Some incorrectly recognized tables:
@@ -22,7 +22,7 @@
     <img src="gifs/72.gif" width=49%>
 
     - due to not precise enough parameters
-    
+
     <img src="gifs/41.gif" width=49%><br>
     <img src="gifs/89.gif" width=49%>
 
