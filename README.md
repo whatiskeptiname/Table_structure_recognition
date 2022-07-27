@@ -6,7 +6,8 @@
 # Work progress:
 
 Current version is able to recognize basic table structures as well as some harder (much harder) ones, but needs more (like greater amount) and more complex parameters to return correct results in every situation.
-More info <a href="https://github.com/shentio2/Table_structure_recognition/tree/main/progression">here</a> in progression folder
+More info <a href="https://github.com/shentio2/Table_structure_recognition/tree/main/progression">here</a> in progression folder<br>
+Recently added `Structure` module is able to convert all basic and some complex recognized bounding boxes to `pandas.DataFrame` and will surely be able to convert all possible bboxes in the future
 
 ---
 # Data origin:
@@ -22,6 +23,17 @@ Dataset containing 15 000 table images and their corresponding LaTeX structure
 <br>
 Dataset containing >568 000 table images as well as corresponding HTML structure labels
 </details>
+
+---
+# Methodology
+My approach is based on recurrent, row/column cumulated color intensivity analysis to split table into separate cells and then process them to HTML/LaTeX code
+
+## Steps:
+1. Preprocessing
+2. Structure recognition
+    - Structure recognition parameters optimization using machine learning techniques and parallel processing
+3. OCR using <a href="https://github.com/tesseract-ocr/tesseract">tesseract</a>
+4. Structure conversion
 
 ---
 # Parallel processing
