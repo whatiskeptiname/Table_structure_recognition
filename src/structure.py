@@ -1,6 +1,10 @@
+import warnings
 import pandas as pd
 import numpy as np
-from typing import Tuple
+from typing import Tuple, List
+
+from src.htmlTableParser import HTMLTable
+from src.ocr import OCR
 
 
 class Structure:
@@ -10,11 +14,14 @@ class Structure:
     
     All structure is divided into individual `Cell`s 
     '''
-    def __init__(self, image, boundingBoxes, ocr = False):
+    def __init__(self, 
+                 image: np.array,
+                 boundingBoxes: List[Tuple[int, int, int, int]],
+                 ocr = False):
         self.image = image
         self.cells = self._initCells(boundingBoxes)
-        self._initContent(image, ocr)
-        # TODO: ocr here
+        self._initContent(ocr)
+        self.HTMLCode = self._initHTMLCode()
         
     @property
     def boundingBoxes(self):
@@ -28,27 +35,38 @@ class Structure:
     def content(self):
         return [cell.content for cell in self.cells]
         
-    def _initCells(self, boundingBoxes):
+    def _initCells(self, boundingBoxes: List[Tuple[int, int, int, int]]) -> list:
         gridCoords = self._makeGridCoords(boundingBoxes)
         return [Cell(bbox, gridCoord) for bbox, gridCoord in zip(boundingBoxes, gridCoords)]
     
-    def _makeGridCoords(self, boundingBoxes):
+    def _makeGridCoords(self, boundingBoxes: List[Tuple[int, int, int, int]]) -> list:
         bbox = np.array(boundingBoxes)
         gridCoords = list(zip(*[self._makeGridCoordsInner(bbox[:, coordIndex])
                                 for coordIndex
                                 in range(4)]))
         return gridCoords
         
-    def _makeGridCoordsInner(self, values):
+    def _makeGridCoordsInner(self, values: np.array) -> list:
         mapDict = {value:index for index, value in enumerate(np.unique(values))}
         return [mapDict[value] for value in values]
     
-    def _initContent(self, image, ocr):
-        if ocr:
-            raise NotImplementedError
-        else:
+    def saveContent(self, contentList: list) -> None:
+        if len(contentList) != len(self.cells):
+            warnings.warn(f'Cells ({len(self.cells)}) and recognized text ({len(contentList)}) amounts do not match.')
+        for cell, content in zip(self.cells, contentList):
+            cell.content = content
+            
+    def _initContent(self, ocr) -> None:
+        if not ocr:
             for cell in self.cells:
                 cell.makeTestContent()
+            return
+        ocr = OCR(self)
+        ocr.recognize()
+        
+    def _initHTMLCode(self) -> str:
+        parser = HTMLTable(self)
+        return parser.getFormattedCode()
                 
     def generateDataFrame(self) -> pd.DataFrame:
         '''
@@ -78,81 +96,38 @@ class Structure:
         
         # Code in this function converts it to:
                 
-        {
-            'name': ['', 'odd_even', 'wicked_oe', 'appendlast', ...],
-            'AB': ['#bcktr', '4', '64', '43', ...],
-            'FDCS': {
-                '#bcktr': ['0', '0', '24', ...],
-                '#Tbcktr': ['0', '0', '1'],
-            },
+        [
+            ['name', '', 'odd_even', 'wicked_oe', 'appendlast', ...],
+            ['AB', '#bcktr', '4', '64', '43', ...],
+            ['FDCS', '#bcktr', '0', '0', '24', ...],
+            ['FDCS', '#Tbcktr', '0', '0', '1'],
             ...
-        }
+        ]
 
         # or in other way
 
-        {
-            '(0, 0),(0, 0)': ['(0, 1),(0, 1)', '(0, 2),(0, 2)', ...],
-            '(1, 0),(1, 0)': ['(1, 1),(1, 1)', '(1, 2),(1, 2)', ...],
-            '(2, 0),(3, 0)': {
-                '(2, 1),(2, 1)': ['(2, 2),(2, 2)', ...],
-                '(3, 1),(3, 1)': ['(3, 2),(3, 2)', ...],
-            },
+        [
+            ['(0, 0),(0, 0)', '(0, 1),(0, 1)', '(0, 2),(0, 2)', ...],
+            ['(1, 0),(1, 0)', '(1, 1),(1, 1)', '(1, 2),(1, 2)', ...],
+            ['(2, 0),(3, 0)', '(2, 1),(2, 1)', '(2, 2),(2, 2)', ...],
+            ['(2, 0),(3, 0)', '(3, 1),(3, 1)', '(3, 2),(3, 2)', ...],
             ...
-        }
-        
-        # and then (if any multiindex columns found)\n
-        # `_unifyStructDict` converts it to:
-        
-        {
-            '(0, 0),(0, 0)': {
-                '(0, 1),(0, 1)': ['(0, 2),(0, 2)', ...]
-                },
-            '(1, 0),(1, 0)': {
-                '(1, 1),(1, 1)': ['(1, 2),(1, 2)', ...]
-                },
-            '(2, 0),(3, 0)': {
-                '(2, 1),(2, 1)': ['(2, 2),(2, 2)', ...],
-                '(3, 1),(3, 1)': ['(3, 2),(3, 2)', ...],
-            },
-            ...
-        }
-        
-        # this format used as input to `pd.DataFrame`
-        
+        ]
+                
         ```
         '''
-        self.cells = sorted(self.cells, key=lambda cell: cell.gridCoord.rowLeft)
-        rowColumnDict = {rowNr: [] for rowNr in np.unique(self.gridCoords.rowLeft)}
-        for cell in self.cells:
-            rowColumnDict[cell.gridCoord.rowLeft].append(cell)
-
-        multindexUsed = False
-        structDict = {}
-        for cell in self.cells:
+        cells = sorted(self.cells, key=lambda cell: cell.gridCoord.rowLeft)
+        dfColumns = np.array([[None 
+                            for _ 
+                            in range(np.max(self.gridCoords.rowLeft) + 1)] 
+                            for _ 
+                            in range(np.max(self.gridCoords.colTop) + 1)])
+        for cell in cells:
             coord = cell.gridCoord
-            if not coord.colTop:
-                rowColumnDict[coord.rowLeft].remove(cell)
-                if coord.rowRight - coord.rowLeft:
-                    multindexUsed = True
-                    for rowIndex in range(coord.rowLeft, coord.rowRight+1):
-                        firstVal = rowColumnDict[rowIndex][0]
-                        structDict[(cell, firstVal)] = rowColumnDict[rowIndex][1:]
-                else:
-                    structDict[cell] = rowColumnDict[coord.rowLeft]
-                    
-        if multindexUsed:
-            structDict = self._unifyStructDict(structDict)
-        return pd.DataFrame(structDict)
-                    
-    def _unifyStructDict(self, structDict):
-        newStructDict = {}
-        for key in structDict.keys():
-            if not isinstance(key, tuple):
-                keyItems = structDict[key]
-                newStructDict[(key, keyItems[0])] = keyItems[1:]
-            else:
-                newStructDict[key] = structDict[key]
-        return newStructDict
+            rowCoords = slice(coord.rowLeft, coord.rowRight+1)
+            colCoords = slice(coord.colTop, coord.colDown+1)
+            dfColumns[colCoords, rowCoords] = cell
+        return pd.DataFrame(dfColumns)
     
     
 class Cell:

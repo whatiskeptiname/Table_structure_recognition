@@ -26,6 +26,7 @@ def show(image,
          darkenWhitePixelsBy: int = 40):
     if nameParams is None:
         nameParams = {}
+    image = _convertToColor(image)
     hiddenGraphs = []
     if hiddenGraphFunction is not None:
         hiddenGraphs = _addHiddenGraphs(hiddenGraphFunction, image, darkenWhitePixelsBy)
@@ -82,6 +83,13 @@ def _createImgNameFromDict(dict):
     nameElements.extend([f'{key}: {value}' for key, value in dict.items() if key not in atFirst])
     return '; '.join(nameElements)
     # return '; '.join(f'{key}: {value}' for key, value in dict.items() if value is not None)
+
+def _convertToColor(image):
+    if len(image.shape) == 2:
+        return cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    if len(image.shape) == 3:
+        return image
+    raise NotImplementedError
 
 def _darkenTheseWhitePixels(image: np.array, below: int,  by: int = 40):
     if not by:
@@ -243,8 +251,12 @@ def addHiddenPlots(image: np.array, darkenWhitePixelsBy: int) -> tuple:
     '''
     Used to show table skeleton after clicking on displayed image
     '''
-    columnValues = image.sum(axis=0)
-    rowValues = image.sum(axis=1)
+    if len(image.shape) == 3:
+        columnValues = image[:,:,0].sum(axis=0)
+        rowValues = image[:,:,0].sum(axis=1)
+    else:
+        columnValues = image.sum(axis=0)
+        rowValues = image.sum(axis=1)
     kindOfSkeleton = np.matmul(rowValues[:, None], columnValues[None, :])
     kindOfSkeleton = (255*kindOfSkeleton/np.max(kindOfSkeleton)).astype('uint8')
     kindOfSkeleton = cv2.cvtColor(kindOfSkeleton, cv2.COLOR_GRAY2BGR)
@@ -271,7 +283,7 @@ def showBboxOnImage(image: np.array,
         kwargs['nameParams'] = {}
     if kwargs['nameParams'].get('bbox') is None:
         kwargs['nameParams']['bbox'] = bboxList
-    showInLoop([cv2.rectangle(215*image.copy(), bbox[:2], bbox[2:], (0,0,0), 2)
+    showInLoop([cv2.rectangle(image.copy(), bbox[:2], bbox[2:], (0,0,0), 2)
                 for bbox 
                 in bboxList],
                **kwargs)

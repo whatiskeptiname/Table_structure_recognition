@@ -31,7 +31,7 @@ class StructureRecognizer:
             lines detected by `maxMissingToBeStillFull` and not only cell border lines
         - ignoreSplitDistanceLessThan: `int`
             - when two split points at this or less distance from each other\n
-            are detected, area in between them is ignored and\n
+            are detected, area in between is ignored and\n
             not treated as another cell
             
         ---
@@ -45,12 +45,15 @@ class StructureRecognizer:
             
     '''
     def __init__(self,
-                 maxFilledInEmptyLine: int = 3,
+                 unprocessedImage: np.array,
+                 maxFilledInEmptyLine: int = 2,
                  maxMissingToBeStillFull: int = 5,
                  minEmptyLineWidth: tuple = (14,4),
                  minEmptyLineDistanceFromBorder: tuple = (5,5),
                  minDistanceFromFull: int = 3,
                  ignoreSplitDistanceLessThan: int = 6):
+        self.originalImage = unprocessedImage.copy()
+        self.whiteColorValue = np.max(self.originalImage)
         self.maxFilledInEmptyLine = maxFilledInEmptyLine
         self.maxMissingToBeStillFull = maxMissingToBeStillFull
         self.minEmptyLineWidth = minEmptyLineWidth
@@ -58,17 +61,39 @@ class StructureRecognizer:
         self.minDistanceFromFull = minDistanceFromFull
         self.ignoreSplitDistanceLessThan = ignoreSplitDistanceLessThan
 
-    def splitOnCells(self, image: np.array) -> List[Tuple[int, int, int, int]]:
+    @staticmethod
+    def getParamsDict():
+        return {
+            'maxFilledInEmptyLine': 2,
+            'maxMissingToBeStillFull': 5,
+            'minEmptyLineWidth': (14,4),
+            'minEmptyLineDistanceFromBorder': (5,5),
+            'minDistanceFromFull': 3,
+            'ignoreSplitDistanceLessThan': 6
+        }
+
+    def recognize(self, image: np.array) -> Tuple[List[Tuple[int, int, int, int]], np.array]:
         '''
         Main module function that splits table image on separate cells.
         Recognizes table structure both with and without visual line separation between cells
+        
+        # Parameters:
+        - image `np.array`
+            - binary image of table to process
+            
+        # Returns:
+        - list of bounding boxes (`list`)
+        - original image with vanished visible lines (`np.array`)\n
+            (original image means that one passed to `__init__`)
         '''
-        splittedCells = self._splitOnCells(image)[0]
+        splittedCells = self._splitOnCells(image, self.originalImage)[0]
         unifiedCells = self._unifyBoundingBox(splittedCells)
-        return unifiedCells
+        return unifiedCells, self.originalImage
+    
 
     def _splitOnCells(self,
                       image: np.array,
+                      originalImage: np.array,
                       shiftX: int = 0,
                       shiftY: int = 0) -> List[Tuple[int, int, int, int]]:
         '''
@@ -82,34 +107,36 @@ class StructureRecognizer:
         # get split points by visible split lines
         colSplitPoints, rowSplitPoints = self.getLineSplitPoints(
             columnValues,
-            rowValues
+            rowValues,
+            originalImage
             )
         
         # if any splitPoints found, 
         # go into recursion with splitted image 
         # and return results
         if colSplitPoints is not None:
-            boundingBoxes = self._findBoundingBoxes('col', image, colSplitPoints, shiftX, shiftY)
+            boundingBoxes = self._findBoundingBoxes('col', image, originalImage, colSplitPoints, shiftX, shiftY)
             return boundingBoxes, False
         if rowSplitPoints is not None:
-            boundingBoxes = self._findBoundingBoxes('row', image, rowSplitPoints, shiftX, shiftY)
+            boundingBoxes = self._findBoundingBoxes('row', image, originalImage, rowSplitPoints, shiftX, shiftY)
             return boundingBoxes, False
         
         # get splitPoints by invisible split lines
         colEmptySplitPoints, rowEmptySplitPoints = self.getEmptyLineSplitPoints(
             columnValues,
             rowValues,
-            image.shape
+            image.shape,
+            originalImage,
         )
         
         # if any splitPoints found
         # go into recursion with splitted image
         # and return results
         if colEmptySplitPoints is not None:
-            boundingBoxes = self._findBoundingBoxes('col', image, colEmptySplitPoints, shiftX, shiftY)
+            boundingBoxes = self._findBoundingBoxes('col', image, originalImage, colEmptySplitPoints, shiftX, shiftY)
             return boundingBoxes, False
         if rowEmptySplitPoints is not None:
-            boundingBoxes = self._findBoundingBoxes('row', image, rowEmptySplitPoints, shiftX, shiftY)
+            boundingBoxes = self._findBoundingBoxes('row', image, originalImage, rowEmptySplitPoints, shiftX, shiftY)
             return boundingBoxes, False
         
         # return bounding box if no further splits possible
@@ -121,6 +148,7 @@ class StructureRecognizer:
     def _findBoundingBoxes(self,
                            splitType: str,
                            image: np.array, 
+                           originalImage: np.array,
                            splitPoints: List[Tuple[int]], 
                            shiftX: int,
                            shiftY: int) -> List[Tuple[int, int, int, int]]:
@@ -132,12 +160,14 @@ class StructureRecognizer:
             if splitType == 'col':
                 boundingBoxes, wasLowestSplit = self._splitOnCells(
                     image[:, splitPoint1:splitPoint2],
+                    originalImage[:, splitPoint1:splitPoint2],
                     shiftX + splitPoint1,
                     shiftY
                 )
             elif splitType == 'row':
                 boundingBoxes, wasLowestSplit = self._splitOnCells(
                     image[splitPoint1: splitPoint2, :],
+                    originalImage[splitPoint1:splitPoint2, :],
                     shiftX,
                     shiftY + splitPoint1
                 )
@@ -150,8 +180,11 @@ class StructureRecognizer:
     def getLineSplitPoints(self,
                            columnValues: np.array,
                            rowValues: np.array,
+                           originalImage: np.array,
                            returnFirstFound = True) -> Tuple[Union[List[int], None]]:
         '''
+        Function to find table split points based on visible lines
+        
         # Returns `tuple` with 2 items:
             - columns split points (each points as single `int`)\n
             or `None` if not found such points
@@ -168,7 +201,7 @@ class StructureRecognizer:
                 colSplitPoints = np.nonzero(~np.any(thresh, axis=0))[0]
                 if colSplitPoints.size:
                     colSplitPoints = self._addBorderpoints(colSplitPoints, thresh.shape[1])
-                    colSplitPoints = self._createPoints(colSplitPoints)
+                    colSplitPoints = self._createPoints(colSplitPoints, originalImage, 'col')
                     if colSplitPoints.size > 2:
                         if returnFirstFound:
                             return colSplitPoints, None
@@ -178,7 +211,7 @@ class StructureRecognizer:
                 rowSplitPoints = np.nonzero(~np.any(thresh, axis=1))[0]
                 if rowSplitPoints.size:
                     rowSplitPoints = self._addBorderpoints(rowSplitPoints, thresh.shape[0])
-                    rowSplitPoints = self._createPoints(rowSplitPoints)
+                    rowSplitPoints = self._createPoints(rowSplitPoints, originalImage, 'row')
                     if rowSplitPoints.size > 2:
                         if returnFirstFound:
                             return None, rowSplitPoints
@@ -194,22 +227,11 @@ class StructureRecognizer:
     def getEmptyLineSplitPoints(self,
                                 columnValues: np.array,
                                 rowValues: np.array,
-                                imageShape: tuple) -> Tuple[Union[List[int], None]]:
+                                imageShape: tuple,
+                                originalImage: np.array) -> Tuple[Union[List[int], None]]:
         '''
         Function to find table split points based on empty lines
         
-        # Parameters:
-        - image: `np.array`
-        - maxFilledInEmptyLine: `int`
-        - minEmptyLineDistanceFromBorder: `tuple`
-            - `tuple` with 2 values: 
-                - first one for column splits
-                - second one for row splits
-        - minEmptyLineWidth: `tuple`
-            - `tuple` with 2 values: 
-                - first one for column splits
-                - second one for row splits
-                
         # Returns `tuple` with 2 items:
             - columns split points (each points as single `int`)\n
             or `None` if not found such points
@@ -258,9 +280,9 @@ class StructureRecognizer:
         # creating points with `ignoreSplitDistanceLessThan == 0`, because
         # such poinst were filtered out in `_filterEmptyLines`
         if splitPointsCol is not None:
-            splitPointsCol = self._createPoints(splitPointsCol, 0)
+            splitPointsCol = self._createPoints(splitPointsCol, originalImage, 'col', 0)
         if splitPointsRow is not None:
-            splitPointsRow = self._createPoints(splitPointsRow, 0)
+            splitPointsRow = self._createPoints(splitPointsRow, originalImage, 'row', 0)
         
         return splitPointsCol, splitPointsRow
 
@@ -326,13 +348,28 @@ class StructureRecognizer:
         
     def _createPoints(self,
                       splitPoints: np.array,
+                      originalImage: np.array,
+                      splitType: str,
                       ignoreSplitDistanceLessThan: int = None) -> np.array:
         ignoreSplitDistanceLessThan = ignoreSplitDistanceLessThan if ignoreSplitDistanceLessThan is not None else self.ignoreSplitDistanceLessThan
         return np.array([(splitPoint1, splitPoint2)
                         for splitPoint1, splitPoint2 
-                        in zip(splitPoints, splitPoints[1:]) 
-                        if splitPoint2 - splitPoint1 > ignoreSplitDistanceLessThan])
+                        in zip(splitPoints, splitPoints[1:])
+                        # `_vanishBorderLines` has to be here instead of in
+                        # `_findBoundingBoxes` because we exclude here some valid,
+                        # but too close to each other split points (possibly) with border lines
+                        if self._vanishBorderLines(splitPoint1, originalImage, splitType) is None
+                           and splitPoint2 - splitPoint1 > ignoreSplitDistanceLessThan])
         
+    def _vanishBorderLines(self,
+                            splitPoint1: int,
+                            originalImage: np.array,
+                            splitType: str):
+        if splitType == 'col':
+            originalImage[:, splitPoint1] = self.whiteColorValue
+        if splitType == 'row':
+            originalImage[splitPoint1, :] = self.whiteColorValue
+            
         
     def _unifyBoundingBox(self, 
                           bbox: List[Tuple[int, int, int, int]],
